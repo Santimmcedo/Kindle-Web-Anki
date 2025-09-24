@@ -22,7 +22,9 @@ function ankiConnectRequest(action, params = {}) {
             headers: {
                 'Content-Type': 'application/json',
                 'Content-Length': body.length
-            }
+            },
+            // --- MUDANÇA CRUCIAL: Adiciona um timeout de 30 segundos ---
+            timeout: 30000 // 30 segundos em milissegundos
         };
 
         const protocol = ankiConnectUrl.startsWith('https') ? https : http;
@@ -42,6 +44,12 @@ function ankiConnectRequest(action, params = {}) {
                     reject(new Error(`Falha ao analisar a resposta do AnkiConnect: ${data}`));
                 }
             });
+        });
+        
+        // Lida com erros de timeout
+        req.on('timeout', () => {
+            req.destroy();
+            reject(new Error('A ligação ao AnkiConnect demorou demasiado tempo (timeout).'));
         });
 
         req.on('error', (e) => reject(new Error(`Erro na ligação ao AnkiConnect: ${e.message}`)));
@@ -70,21 +78,20 @@ const server = http.createServer(async (req, res) => {
 
         console.log(`Encontrados ${cardIds.length} cartões. A obter a informação em lotes...`);
         
-        // --- LÓGICA DE PROCESSAMENTO EM LOTES ---
-        const batchSize = 100; // Pedimos 100 cartões de cada vez
+        // --- MUDANÇA CRUCIAL: Lotes muito mais pequenos ---
+        const batchSize = 20; 
         let allCardsInfo = [];
 
         for (let i = 0; i < cardIds.length; i += batchSize) {
             const batch = cardIds.slice(i, i + batchSize);
-            console.log(`A processar lote ${Math.floor(i/batchSize) + 1}...`);
+            console.log(`A processar lote ${Math.floor(i/batchSize) + 1} de ${Math.ceil(cardIds.length/batchSize)}...`);
             const batchInfo = await ankiConnectRequest('cardsInfo', { cards: batch });
             allCardsInfo = allCardsInfo.concat(batchInfo);
         }
-        // --- FIM DA LÓGICA DE LOTES ---
-
+        
+        console.log("Todos os lotes foram processados com sucesso!");
         let cardsHtml = "";
         for (const card of allCardsInfo) {
-            // Verifica se os campos existem antes de aceder ao 'value'
             const front_content = card.fields.Front ? card.fields.Front.value : "[Frente em branco]";
             const back_content = card.fields.Back ? card.fields.Back.value : "[Verso em branco]";
             cardsHtml += `
@@ -111,4 +118,5 @@ const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
     console.log(`Servidor "ponte" a funcionar na porta ${PORT}`);
 });
+
 
