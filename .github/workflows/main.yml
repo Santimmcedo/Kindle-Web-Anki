@@ -1,63 +1,69 @@
-# Nome do fluxo de trabalho
 name: Build and Deploy Anki Deck to GitHub Pages
 
-# Gatilhos: Quando este fluxo vai rodar
 on:
-  # Permite que você rode manualmente pela aba "Actions" do GitHub
+  # Permite executar este fluxo manualmente a partir da aba Actions
   workflow_dispatch:
-  
-  # Roda em um cronograma (schedule)
-  # Este exemplo roda a cada 12 horas. Use https://crontab.guru/ para customizar.
+  # Executa a cada 12 horas
   schedule:
     - cron: '0 */12 * * *'
 
-# Permissões necessárias para o job poder publicar no GitHub Pages
+# Permissões para o GITHUB_TOKEN para permitir o deploy no GitHub Pages
 permissions:
   contents: read
   pages: write
   id-token: write
 
-# Define o que acontece quando o fluxo roda
+# Permite apenas um deploy concorrente
+concurrency:
+  group: "pages"
+  cancel-in-progress: true
+
 jobs:
   build-and-deploy:
-    runs-on: ubuntu-latest # O robô vai usar um ambiente Linux
-    
+    runs-on: ubuntu-latest
     steps:
-      # 1. Clona o seu repositório para o ambiente do robô
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      # 2. Configura o ambiente Python
+      # ATUALIZAÇÃO: Usa uma ação dedicada para instalar o Chrome de forma mais fiável
+      - name: Set up Chrome
+        uses: browser-actions/setup-chrome@v1
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
-      # 3. Instala as dependências Python listadas no requirements.txt
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          
-      # 4. Roda o script principal para baixar, extrair e gerar o HTML
-      - name: Run Anki Exporter
+
+      - name: Run exporter script
+        run: python anki_exporter.py
         env:
           ANKIWEB_USERNAME: ${{ secrets.ANKIWEB_USERNAME }}
           ANKIWEB_PASSWORD: ${{ secrets.ANKIWEB_PASSWORD }}
           DECK_NAME: ${{ secrets.DECK_NAME }}
-        run: python anki_exporter.py
 
-      # 5. Configura o GitHub Pages para a publicação
+      # Salva o screenshot de depuração caso o script falhe
+      - name: Archive debug artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-artifacts
+          path: debug_screenshot.png
+
       - name: Setup Pages
-        uses: actions/configure-pages@v4
+        uses: actions/configure-pages@v5
 
-      # 6. Faz o upload do artefato (a pasta 'public' com o index.html)
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: './public'
-          
-      # 7. Publica o artefato no GitHub Pages
+          # Faz o upload do diretório 'public'
+          path: ./public
+
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+
