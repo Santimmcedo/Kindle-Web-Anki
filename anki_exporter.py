@@ -4,10 +4,16 @@ import json
 import zipfile
 import sqlite3
 import pandas as pd
-import re # Importa a biblioteca para expressões regulares
+import time
+
+# Importações do Selenium
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import TimeoutException
 
 # --- Configuração ---
-# Estas variáveis serão lidas dos "Secrets" do GitHub
 ANKIWEB_USERNAME = os.environ.get("ANKIWEB_USERNAME")
 ANKIWEB_PASSWORD = os.environ.get("ANKIWEB_PASSWORD")
 DECK_NAME = os.environ.get("DECK_NAME", "Default")
@@ -19,79 +25,76 @@ HTML_PATH = os.path.join(OUTPUT_DIR, "index.html")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 def anki_login_and_download():
-    """Faz login no AnkiWeb e baixa a coleção completa."""
-    print("Iniciando sessão no AnkiWeb...")
-    session = requests.Session()
+    """Faz login no AnkiWeb usando um navegador real (Selenium) e baixa a coleção."""
+    print("Configurando o navegador headless...")
+    options = webdriver.ChromeOptions()
+    options.add_argument("--headless")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--window-size=1920,1080")
     
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Connection': 'keep-alive',
-    }
-    session.headers.update(headers)
+    driver = webdriver.Chrome(options=options)
     
-    login_url = "https://ankiweb.net/account/login"
-    
-    # ATUALIZAÇÃO: Obter o token CSRF diretamente do HTML da página de login
-    print("A obter o token CSRF da página de login...")
     try:
-        response_get = session.get(login_url)
-        response_get.raise_for_status() # Verifica se o pedido GET foi bem sucedido
+        print("Navegando para a página de login do AnkiWeb...")
+        driver.get("https://ankiweb.net/account/login")
+
+        # Espera até que os campos de login estejam presentes
+        wait = WebDriverWait(driver, 15)
         
-        # Procura pelo token CSRF no conteúdo HTML
-        match = re.search(r'<input type="hidden" name="_csrf" value="([^"]+)">', response_get.text)
-        if not match:
-            raise ValueError("Token CSRF não encontrado no HTML.")
-            
-        csrf_token = match.group(1)
-        print("Token CSRF obtido com sucesso.")
-    except (requests.exceptions.RequestException, ValueError) as e:
-        print(f"--- DEBUG INFO (GET) ---")
-        print(f"Erro ao obter a página de login: {e}")
-        print(f"Status Code: {response_get.status_code if 'response_get' in locals() else 'N/A'}")
-        print(f"Response Text: {response_get.text[:500] if 'response_get' in locals() else 'N/A'}")
-        print("--------------------")
-        raise Exception("Não foi possível carregar a página de login do AnkiWeb para obter o token de segurança.")
+        print("Preenchendo o formulário de login...")
+        email_field = wait.until(EC.presence_of_element_located((By.ID, "email")))
+        password_field = wait.until(EC.presence_of_element_located((By.ID, "password")))
+        
+        email_field.send_keys(ANKIWEB_USERNAME)
+        password_field.send_keys(ANKIWEB_PASSWORD)
+        
+        print("Submetendo o formulário...")
+        login_button = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, ".btn-primary")))
+        login_button.click()
+        
+        # Espera pelo redirecionamento para a página de baralhos como confirmação de login
+        wait.until(EC.url_contains("/decks/"))
+        print("Login bem-sucedido.")
 
-    login_data = {
-        "username": ANKIWEB_USERNAME,
-        "password": ANKIWEB_PASSWORD,
-        "_csrf": csrf_token,
-        "submitted": "1"
-    }
-    
-    print("A enviar pedido de login...")
-    response_post = session.post(login_url, data=login_data, headers={"Referer": login_url})
-    
-    if "Invalid username or password" in response_post.text or "form-error" in response_post.text or response_post.status_code != 200:
-        print("--- DEBUG INFO (POST) ---")
-        print(f"Status Code: {response_post.status_code}")
-        print(f"Response URL: {response_post.url}")
-        print(f"Response Text (primeiros 500 caracteres): {response_post.text[:500]}")
-        print("--------------------")
-        raise Exception("Falha no login do AnkiWeb. Verifique as credenciais.")
+        # ATUALIZAÇÃO: Usa os cookies do Selenium para baixar com o 'requests'
+        print("Extraindo cookies da sessão do navegador...")
+        selenium_cookies = driver.get_cookies()
+        
+        # Cria uma sessão 'requests' para o download
+        session = requests.Session()
+        for cookie in selenium_cookies:
+            session.cookies.set(cookie['name'], cookie['value'], domain=cookie['domain'])
 
-    print("Login bem-sucedido.")
+        print("Baixando a coleção de baralhos...")
+        download_url = "https://ankiweb.net/decks/download"
+        response = session.get(download_url, stream=True, headers={'User-Agent': 'Mozilla/5.0'})
+        
+        if response.status_code != 200:
+            raise Exception(f"Não foi possível baixar a coleção. Status: {response.status_code}")
 
-    print("Baixando a coleção de baralhos...")
-    download_url = "https://ankiweb.net/decks/download"
-    response = session.get(download_url, stream=True)
-    
-    if response.status_code != 200:
-        raise Exception("Não foi possível baixar a coleção.")
+        zip_path = os.path.join(OUTPUT_DIR, "collection.apkg")
+        with open(zip_path, "wb") as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                f.write(chunk)
+        print("Download da coleção concluído.")
+        
+    except TimeoutException:
+        print("--- DEBUG INFO (SELENIUM) ---")
+        print(f"URL atual: {driver.current_url}")
+        print("Ocorreu um Timeout. A página pode ter mudado ou o login falhou.")
+        driver.save_screenshot("debug_screenshot.png") # Salva uma imagem para depuração
+        print(f"Screenshot salvo como 'debug_screenshot.png' nos artifacts da Action.")
+        print("-----------------------------")
+        raise Exception("Falha no login do AnkiWeb (Timeout). Verifique as credenciais ou a estrutura da página.")
+    finally:
+        driver.quit()
 
-    zip_path = os.path.join(OUTPUT_DIR, "collection.apkg")
-    with open(zip_path, "wb") as f:
-        for chunk in response.iter_content(chunk_size=8192):
-            f.write(chunk)
-    print("Download da coleção concluído.")
-    
     print("Extraindo a coleção...")
     with zipfile.ZipFile(zip_path, 'r') as zip_ref:
         zip_ref.extractall(OUTPUT_DIR)
     print("Extração concluída.")
-    os.remove(zip_path) # Limpa o arquivo zip
+    os.remove(zip_path)
 
 def extract_cards_from_db():
     """Extrai os cartões do baralho especificado do banco de dados SQLite."""
@@ -143,6 +146,7 @@ if __name__ == "__main__":
     anki_login_and_download()
     extracted_cards = extract_cards_from_db()
     generate_html(extracted_cards)
+
 
 
 
