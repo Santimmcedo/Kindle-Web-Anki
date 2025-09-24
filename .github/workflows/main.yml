@@ -20,6 +20,25 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      
+      # --- NOVO PASSO DE DEPURAÇÃO ---
+      - name: Check for Secrets
+        run: |
+          if [ -z "${{ secrets.ANKIWEB_USERNAME }}" ]; then
+            echo "ERRO: O secret ANKIWEB_USERNAME NÃO foi encontrado."
+          else
+            echo "SUCESSO: O secret ANKIWEB_USERNAME foi encontrado."
+          fi
+          if [ -z "${{ secrets.ANKIWEB_PASSWORD }}" ]; then
+            echo "ERRO: O secret ANKIWEB_PASSWORD NÃO foi encontrado."
+          else
+            echo "SUCESSO: O secret ANKIWEB_PASSWORD foi encontrado."
+          fi
+          if [ -z "${{ secrets.DECK_NAME }}" ]; then
+            echo "ERRO: O secret DECK_NAME NÃO foi encontrado."
+          else
+            echo "SUCESSO: O secret DECK_NAME foi encontrado."
+          fi
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -34,12 +53,10 @@ jobs:
       - name: Run exporter script
         run: python anki_exporter.py
         env:
-          # Passa os secrets para o script Python
-          ANKIWEB_SESSION_COOKIE: ${{ secrets.ANKIWEB_SESSION_COOKIE }}
+          ANKIWEB_USERNAME: ${{ secrets.ANKIWEB_USERNAME }}
+          ANKIWEB_PASSWORD: ${{ secrets.ANKIWEB_PASSWORD }}
           DECK_NAME: ${{ secrets.DECK_NAME }}
       
-      # REMOVEMOS O PASSO DE INSTALAR O CHROME DAQUI
-
       - name: Setup Pages
         uses: actions/configure-pages@v5
 
