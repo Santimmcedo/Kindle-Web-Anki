@@ -1,19 +1,15 @@
 name: Build and Deploy Anki Deck to GitHub Pages
 
 on:
-  # Permite executar este fluxo manualmente a partir da aba Actions
-  workflow_dispatch:
-  # Executa a cada 12 horas
+  workflow_dispatch: # Permite iniciar manualmente
   schedule:
-    - cron: '0 */12 * * *'
+    - cron: '0 */12 * * *' # Roda a cada 12 horas
 
-# Permissões para o GITHUB_TOKEN para permitir o deploy no GitHub Pages
 permissions:
   contents: read
   pages: write
   id-token: write
 
-# Permite apenas um deploy concorrente
 concurrency:
   group: "pages"
   cancel-in-progress: true
@@ -24,10 +20,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      # ATUALIZAÇÃO: Usa uma ação dedicada para instalar o Chrome de forma mais fiável
-      - name: Set up Chrome
-        uses: browser-actions/setup-chrome@v1
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -42,17 +34,11 @@ jobs:
       - name: Run exporter script
         run: python anki_exporter.py
         env:
-          ANKIWEB_USERNAME: ${{ secrets.ANKIWEB_USERNAME }}
-          ANKIWEB_PASSWORD: ${{ secrets.ANKIWEB_PASSWORD }}
+          # Passa os secrets para o script Python
+          ANKIWEB_SESSION_COOKIE: ${{ secrets.ANKIWEB_SESSION_COOKIE }}
           DECK_NAME: ${{ secrets.DECK_NAME }}
-
-      # Salva o screenshot de depuração caso o script falhe
-      - name: Archive debug artifacts
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: debug-artifacts
-          path: debug_screenshot.png
+      
+      # REMOVEMOS O PASSO DE INSTALAR O CHROME DAQUI
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
@@ -60,7 +46,6 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          # Faz o upload do diretório 'public'
           path: ./public
 
       - name: Deploy to GitHub Pages
