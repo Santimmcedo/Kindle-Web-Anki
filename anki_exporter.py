@@ -9,11 +9,12 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
+from selenium_stealth import stealth # Importa a biblioteca stealth
 
 def anki_login_and_process():
     """
-    Usa Selenium para fazer login diretamente no AnkiWeb, obtém o CSRF token
-    e depois faz o download da coleção.
+    Usa Selenium com stealth para fazer login diretamente no AnkiWeb, 
+    obtém o CSRF token e depois faz o download da coleção.
     """
     print("A verificar a presença dos Secrets...")
     username = os.environ.get("ANKIWEB_USERNAME")
@@ -39,13 +40,22 @@ def anki_login_and_process():
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--window-size=1920,1080")
-    options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
     
-    # --- MUDANÇA CRUCIAL PARA EVITAR DETEÇÃO ---
+    # Remove os outros argumentos de anti-deteção, pois o stealth lida com isso
     options.add_experimental_option("excludeSwitches", ["enable-automation"])
-    options.add_argument('--disable-blink-features=AutomationControlled')
+    options.add_experimental_option('useAutomationExtension', False)
     
     driver = webdriver.Chrome(service=ChromeService(ChromeDriverManager().install()), options=options)
+    
+    # --- APLICA O MODO STEALTH ---
+    stealth(driver,
+            languages=["en-US", "en"],
+            vendor="Google Inc.",
+            platform="Win32",
+            webgl_vendor="Intel Inc.",
+            renderer="Intel Iris OpenGL Engine",
+            fix_hairline=True,
+            )
     
     session_cookie = None
     csrf_token = None
@@ -63,7 +73,7 @@ def anki_login_and_process():
         password_field.send_keys(password)
         
         login_button = driver.find_element(By.CSS_SELECTOR, "button[type='submit']")
-        login_button.click()
+        driver.execute_script("arguments[0].click();", login_button) # Usa JS para clicar, mais robusto
 
         print("A aguardar o redirecionamento após o login...")
         wait.until(EC.visibility_of_element_located((By.XPATH, "//a[contains(text(), 'Decks')]")))
@@ -76,8 +86,6 @@ def anki_login_and_process():
 
     except Exception as e:
         print("--- DEBUG INFO (SELENIUM) ---")
-        print("A página HTML no momento do erro era:")
-        print(driver.page_source) # Imprime o HTML para depuração
         driver.save_screenshot("debug_screenshot.png")
         print(f"\nOcorreu um erro durante a automação do navegador: {e}")
         print("Screenshot de depuração salvo nos 'artifacts' da Action.")
@@ -149,4 +157,5 @@ def anki_login_and_process():
 
 if __name__ == "__main__":
     anki_login_and_process()
+
 
