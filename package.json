@@ -1,0 +1,13 @@
+{
+  "name": "anki-connect-bridge",
+  "version": "1.0.0",
+  "description": "A bridge server to connect to a local AnkiConnect instance.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {}
+}
+
