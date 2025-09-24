@@ -52,18 +52,21 @@ def anki_download_and_process():
         print("A recarregar a página de baralhos (agora com login)...")
         driver.get("https://ankiweb.net/decks")
         
-        # --- MUDANÇA CRUCIAL ---
-        # Espera até 30 segundos que um elemento visível (o link dos baralhos) apareça.
-        # Isto confirma que o login funcionou e a página renderizou.
-        print("A esperar que a página seja renderizada pelo JavaScript...")
+        # --- LÓGICA DE ESPERA EM DUAS ETAPAS ---
         wait = WebDriverWait(driver, 30)
+
+        # 1. Espera que a página principal seja renderizada (procurando pelo link "Decks")
+        print("A esperar que a página principal seja renderizada...")
         wait.until(
             EC.visibility_of_element_located((By.XPATH, "//a[contains(text(), 'Decks')]"))
         )
         print("Página de baralhos carregada com sucesso!")
         
-        # Agora que a página carregou, o token DEVE estar presente.
-        csrf_token_element = driver.find_element(By.CSS_SELECTOR, "input[name='csrf_token']")
+        # 2. Agora, espera especificamente pelo campo do token de segurança.
+        print("A esperar pelo token de segurança (CSRF)...")
+        csrf_token_element = wait.until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, "input[name='csrf_token']"))
+        )
         csrf_token = csrf_token_element.get_attribute('value')
         print("Token de segurança (CSRF) extraído com sucesso!")
 
