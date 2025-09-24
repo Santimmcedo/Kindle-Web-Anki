@@ -22,6 +22,13 @@ def anki_login_and_download():
     """Faz login no AnkiWeb e baixa a coleção completa."""
     print("Iniciando sessão no AnkiWeb...")
     session = requests.Session()
+    
+    # ATUALIZAÇÃO: Adiciona um User-Agent para simular um navegador real
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+    }
+    session.headers.update(headers)
+    
     login_url = "https://ankiweb.net/account/login"
     
     # AnkiWeb espera um cookie 'ankiweb' antes do login
@@ -37,8 +44,15 @@ def anki_login_and_download():
     
     response = session.post(login_url, data=login_data, headers={"Referer": login_url})
     
-    if "Invalid username or password" in response.text or response.status_code != 200:
-        raise Exception("Falha no login do AnkiWeb. Verifique as credenciais.")
+    # ATUALIZAÇÃO: Mensagem de erro mais detalhada
+    if "Invalid username or password" in response.text or "form-error" in response.text or response.status_code != 200:
+        print("--- DEBUG INFO ---")
+        print(f"Status Code: {response.status_code}")
+        print(f"Response URL: {response.url}")
+        print(f"Response Text (primeiros 500 caracteres): {response.text[:500]}")
+        print("--------------------")
+        raise Exception("Falha no login do AnkiWeb. Verifique as credenciais, ou se a Autenticação de Dois Fatores (2FA) está ativada. Desative a 2FA se for o caso.")
+
     print("Login bem-sucedido.")
 
     print("Baixando a coleção de baralhos...")
@@ -102,7 +116,6 @@ def generate_html(cards):
     print("Gerando o arquivo HTML final...")
     card_data_string = json.dumps(cards)
     
-    # CORREÇÃO: As chaves {} do JavaScript foram escapadas com {{ e }} para não conflitarem com o f-string do Python.
     html_template = f"""
 <!DOCTYPE html>
 <html lang="pt-BR"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Visualizador Anki - {DECK_NAME}</title>
