@@ -102,6 +102,7 @@ def generate_html(cards):
     print("Gerando o arquivo HTML final...")
     card_data_string = json.dumps(cards)
     
+    # CORREÇÃO: As chaves {} do JavaScript foram escapadas com {{ e }} para não conflitarem com o f-string do Python.
     html_template = f"""
 <!DOCTYPE html>
 <html lang="pt-BR"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Visualizador Anki - {DECK_NAME}</title>
@@ -109,7 +110,7 @@ def generate_html(cards):
 </head><body>
 <div id="app"><div id="flashcard" class="flashcard"><div id="card-front"></div><div id="card-back" class="flashcard-back"></div></div><div class="controls"><button id="btn-prev" disabled>Anterior</button><button id="btn-reveal">Mostrar Resposta</button><button id="btn-next" disabled>Próximo</button></div><div id="counter"></div></div>
 <script>
-document.addEventListener('DOMContentLoaded',()=>{const t=document.getElementById("card-front"),e=document.getElementById("card-back"),n=document.getElementById("btn-prev"),o=document.getElementById("btn-reveal"),d=document.getElementById("btn-next"),c=document.getElementById("counter"),r={card_data_string};let i=0,a=!1;function s(l){{if(r&&0!==r.length&&!(l<0||l>=r.length)){{i=l,a=!1;const s=r[i];t.innerHTML=s.front.replace(/\\n/g,"<br>"),e.innerHTML=s.back.replace(/\\n/g,"<br>"),e.style.display="none",o.textContent="Mostrar Resposta",c.textContent=\`Cartão \${{i+1}} de \${{r.length}}\`,n.disabled=0===i,d.disabled=i===r.length-1}}else t.textContent="Nenhum cartão carregado."}}o.addEventListener("click",()=>{a=!a,e.style.display=a?"block":"none",o.textContent=a?"Ocultar Resposta":"Mostrar Resposta"}),d.addEventListener("click",()=>{i<r.length-1&&s(i+1)}),n.addEventListener("click",()=>{i>0&&s(i-1)}),s(0)});
+document.addEventListener('DOMContentLoaded',()=>{{const t=document.getElementById("card-front"),e=document.getElementById("card-back"),n=document.getElementById("btn-prev"),o=document.getElementById("btn-reveal"),d=document.getElementById("btn-next"),c=document.getElementById("counter"),r={card_data_string};let i=0,a=!1;function s(l){{if(r&&0!==r.length&&!(l<0||l>=r.length)){{i=l,a=!1;const s=r[i];t.innerHTML=s.front.replace(/\\n/g,"<br>"),e.innerHTML=s.back.replace(/\\n/g,"<br>"),e.style.display="none",o.textContent="Mostrar Resposta",c.textContent=`Cartão ${{i+1}} de ${{r.length}}`,n.disabled=0===i,d.disabled=i===r.length-1}}else t.textContent="Nenhum cartão carregado."}}o.addEventListener("click",()=>{{a=!a,e.style.display=a?"block":"none",o.textContent=a?"Ocultar Resposta":"Mostrar Resposta"}}),d.addEventListener("click",()=>{{i<r.length-1&&s(i+1)}}),n.addEventListener("click",()=>{{i>0&&s(i-1)}}),s(0)}});
 </script>
 </body></html>"""
 
@@ -121,3 +122,5 @@ if __name__ == "__main__":
     anki_login_and_download()
     extracted_cards = extract_cards_from_db()
     generate_html(extracted_cards)
+
+
