@@ -68,13 +68,25 @@ const server = http.createServer(async (req, res) => {
              return;
         }
 
-        console.log(`Encontrados ${cardIds.length} cartões. A obter a informação...`);
-        const cardsInfo = await ankiConnectRequest('cardsInfo', { cards: cardIds });
+        console.log(`Encontrados ${cardIds.length} cartões. A obter a informação em lotes...`);
+        
+        // --- LÓGICA DE PROCESSAMENTO EM LOTES ---
+        const batchSize = 100; // Pedimos 100 cartões de cada vez
+        let allCardsInfo = [];
+
+        for (let i = 0; i < cardIds.length; i += batchSize) {
+            const batch = cardIds.slice(i, i + batchSize);
+            console.log(`A processar lote ${Math.floor(i/batchSize) + 1}...`);
+            const batchInfo = await ankiConnectRequest('cardsInfo', { cards: batch });
+            allCardsInfo = allCardsInfo.concat(batchInfo);
+        }
+        // --- FIM DA LÓGICA DE LOTES ---
 
         let cardsHtml = "";
-        for (const card of cardsInfo) {
-            const front_content = card.fields.Front.value;
-            const back_content = card.fields.Back.value;
+        for (const card of allCardsInfo) {
+            // Verifica se os campos existem antes de aceder ao 'value'
+            const front_content = card.fields.Front ? card.fields.Front.value : "[Frente em branco]";
+            const back_content = card.fields.Back ? card.fields.Back.value : "[Verso em branco]";
             cardsHtml += `
             <div class="card">
                 <div class="front">${front_content}</div>
