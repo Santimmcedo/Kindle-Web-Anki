@@ -10,51 +10,82 @@ if (!ankiConnectUrl || !DECK_NAME) {
     console.error("ERRO: As variáveis de ambiente ANKICONNECT_URL e DECK_NAME precisam de ser configuradas no Render.");
 }
 
-// Função para fazer um pedido ao AnkiConnect
-function ankiConnectRequest(action, params = {}) {
+// --- MELHORIA: Agente com Keep-Alive para reutilizar a ligação ---
+const agentOptions = {
+    keepAlive: true,
+    maxSockets: 1, // Como os pedidos são sequenciais, 1 socket é suficiente
+    timeout: 45000 // Aumenta o timeout geral do agente
+};
+const httpAgent = new http.Agent(agentOptions);
+const httpsAgent = new https.Agent(agentOptions);
+
+
+// Função para fazer um pedido ao AnkiConnect, agora com lógica de "tentar novamente"
+function ankiConnectRequest(action, params = {}, retries = 3) {
     return new Promise((resolve, reject) => {
-        const body = JSON.stringify({ action, version: 6, params });
-        const options = {
-            hostname: url.parse(ankiConnectUrl).hostname,
-            port: url.parse(ankiConnectUrl).port || 443,
-            path: '/',
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Content-Length': body.length
-            },
-            // --- MUDANÇA CRUCIAL: Adiciona um timeout de 30 segundos ---
-            timeout: 30000 // 30 segundos em milissegundos
-        };
+        
+        const attempt = (retryCount) => {
+            const body = JSON.stringify({ action, version: 6, params });
+            const isHttps = ankiConnectUrl.startsWith('https');
+            
+            const options = {
+                hostname: url.parse(ankiConnectUrl).hostname,
+                port: url.parse(ankiConnectUrl).port || (isHttps ? 443 : 80),
+                path: '/',
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Content-Length': body.length
+                },
+                agent: isHttps ? httpsAgent : httpAgent, // Usa o agente Keep-Alive
+                timeout: 30000 // Timeout por pedido
+            };
 
-        const protocol = ankiConnectUrl.startsWith('https') ? https : http;
+            const protocol = isHttps ? https : http;
 
-        const req = protocol.request(options, (res) => {
-            let data = '';
-            res.on('data', (chunk) => { data += chunk; });
-            res.on('end', () => {
-                try {
-                    const parsed = JSON.parse(data);
-                    if (parsed.error) {
-                        reject(new Error(parsed.error));
-                    } else {
-                        resolve(parsed.result);
+            const req = protocol.request(options, (res) => {
+                let data = '';
+                res.on('data', (chunk) => { data += chunk; });
+                res.on('end', () => {
+                    try {
+                        const parsed = JSON.parse(data);
+                        if (parsed.error) {
+                            reject(new Error(parsed.error));
+                        } else {
+                            resolve(parsed.result);
+                        }
+                    } catch (e) {
+                        reject(new Error(`Falha ao analisar a resposta do AnkiConnect: ${data}`));
                     }
-                } catch (e) {
-                    reject(new Error(`Falha ao analisar a resposta do AnkiConnect: ${data}`));
+                });
+            });
+            
+            req.on('timeout', () => {
+                req.destroy();
+                if (retryCount > 0) {
+                    console.warn(`Tentativa ${4 - retryCount} falhou (timeout). A tentar novamente...`);
+                    setTimeout(() => attempt(retryCount - 1), 1000); // Espera 1s antes de tentar de novo
+                } else {
+                    reject(new Error('A ligação ao AnkiConnect demorou demasiado tempo (timeout) após várias tentativas.'));
                 }
             });
-        });
-        
-        // Lida com erros de timeout
-        req.on('timeout', () => {
-            req.destroy();
-            reject(new Error('A ligação ao AnkiConnect demorou demasiado tempo (timeout).'));
-        });
 
-        req.on('error', (e) => reject(new Error(`Erro na ligação ao AnkiConnect: ${e.message}`)));
-        req.write(body);
-        req.end();
+            req.on('error', (e) => {
+                // --- MELHORIA: Lógica de "Tentar Novamente" ---
+                const retryableErrors = ['ECONNRESET', 'EPIPE', 'ETIMEDOUT', 'SOCKET_HANG_UP'];
+                if (retryCount > 0 && retryableErrors.some(errCode => e.message.includes(errCode))) {
+                    console.warn(`Tentativa ${4 - retryCount} falhou (${e.message}). A tentar novamente...`);
+                    setTimeout(() => attempt(retryCount - 1), 1000);
+                } else {
+                    reject(new Error(`Erro na ligação ao AnkiConnect: ${e.message}`));
+                }
+            });
+            
+            req.write(body);
+            req.end();
+        };
+
+        attempt(retries); // Inicia a primeira tentativa
     });
 }
 
@@ -78,13 +109,14 @@ const server = http.createServer(async (req, res) => {
 
         console.log(`Encontrados ${cardIds.length} cartões. A obter a informação em lotes...`);
         
-        // --- MUDANÇA CRUCIAL: Lotes muito mais pequenos ---
         const batchSize = 20; 
         let allCardsInfo = [];
+        const totalBatches = Math.ceil(cardIds.length / batchSize);
 
         for (let i = 0; i < cardIds.length; i += batchSize) {
             const batch = cardIds.slice(i, i + batchSize);
-            console.log(`A processar lote ${Math.floor(i/batchSize) + 1} de ${Math.ceil(cardIds.length/batchSize)}...`);
+            const currentBatchNum = Math.floor(i / batchSize) + 1;
+            console.log(`A processar lote ${currentBatchNum} de ${totalBatches}...`);
             const batchInfo = await ankiConnectRequest('cardsInfo', { cards: batch });
             allCardsInfo = allCardsInfo.concat(batchInfo);
         }
@@ -118,5 +150,4 @@ const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
     console.log(`Servidor "ponte" a funcionar na porta ${PORT}`);
 });
-
 
