@@ -4,13 +4,13 @@ import json
 import zipfile
 import sqlite3
 import pandas as pd
-from http.cookiejar import MozillaCookieJar
+import re # Importa a biblioteca para expressões regulares
 
 # --- Configuração ---
 # Estas variáveis serão lidas dos "Secrets" do GitHub
 ANKIWEB_USERNAME = os.environ.get("ANKIWEB_USERNAME")
 ANKIWEB_PASSWORD = os.environ.get("ANKIWEB_PASSWORD")
-DECK_NAME = os.environ.get("DECK_NAME", "Default") # Coloque o nome do seu baralho aqui ou configure no Secret
+DECK_NAME = os.environ.get("DECK_NAME", "Default")
 
 # --- Caminhos de Arquivos ---
 OUTPUT_DIR = "public"
@@ -23,17 +23,36 @@ def anki_login_and_download():
     print("Iniciando sessão no AnkiWeb...")
     session = requests.Session()
     
-    # ATUALIZAÇÃO: Adiciona um User-Agent para simular um navegador real
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Connection': 'keep-alive',
     }
     session.headers.update(headers)
     
     login_url = "https://ankiweb.net/account/login"
     
-    # AnkiWeb espera um cookie 'ankiweb' antes do login
-    session.get(login_url)
-    csrf_token = session.cookies.get('ankiweb')
+    # ATUALIZAÇÃO: Obter o token CSRF diretamente do HTML da página de login
+    print("A obter o token CSRF da página de login...")
+    try:
+        response_get = session.get(login_url)
+        response_get.raise_for_status() # Verifica se o pedido GET foi bem sucedido
+        
+        # Procura pelo token CSRF no conteúdo HTML
+        match = re.search(r'<input type="hidden" name="_csrf" value="([^"]+)">', response_get.text)
+        if not match:
+            raise ValueError("Token CSRF não encontrado no HTML.")
+            
+        csrf_token = match.group(1)
+        print("Token CSRF obtido com sucesso.")
+    except (requests.exceptions.RequestException, ValueError) as e:
+        print(f"--- DEBUG INFO (GET) ---")
+        print(f"Erro ao obter a página de login: {e}")
+        print(f"Status Code: {response_get.status_code if 'response_get' in locals() else 'N/A'}")
+        print(f"Response Text: {response_get.text[:500] if 'response_get' in locals() else 'N/A'}")
+        print("--------------------")
+        raise Exception("Não foi possível carregar a página de login do AnkiWeb para obter o token de segurança.")
 
     login_data = {
         "username": ANKIWEB_USERNAME,
@@ -42,16 +61,16 @@ def anki_login_and_download():
         "submitted": "1"
     }
     
-    response = session.post(login_url, data=login_data, headers={"Referer": login_url})
+    print("A enviar pedido de login...")
+    response_post = session.post(login_url, data=login_data, headers={"Referer": login_url})
     
-    # ATUALIZAÇÃO: Mensagem de erro mais detalhada
-    if "Invalid username or password" in response.text or "form-error" in response.text or response.status_code != 200:
-        print("--- DEBUG INFO ---")
-        print(f"Status Code: {response.status_code}")
-        print(f"Response URL: {response.url}")
-        print(f"Response Text (primeiros 500 caracteres): {response.text[:500]}")
+    if "Invalid username or password" in response_post.text or "form-error" in response_post.text or response_post.status_code != 200:
+        print("--- DEBUG INFO (POST) ---")
+        print(f"Status Code: {response_post.status_code}")
+        print(f"Response URL: {response_post.url}")
+        print(f"Response Text (primeiros 500 caracteres): {response_post.text[:500]}")
         print("--------------------")
-        raise Exception("Falha no login do AnkiWeb. Verifique as credenciais, ou se a Autenticação de Dois Fatores (2FA) está ativada. Desative a 2FA se for o caso.")
+        raise Exception("Falha no login do AnkiWeb. Verifique as credenciais.")
 
     print("Login bem-sucedido.")
 
@@ -79,34 +98,23 @@ def extract_cards_from_db():
     print(f"Conectando ao banco de dados: {DB_PATH}")
     con = sqlite3.connect(DB_PATH)
     
-    # Pega o ID do baralho pelo nome
     try:
         decks_df = pd.read_sql_query("SELECT id, name FROM decks", con)
         deck_id = decks_df[decks_df['name'] == DECK_NAME]['id'].iloc[0]
         print(f"ID do baralho '{DECK_NAME}' encontrado: {deck_id}")
     except (IndexError, pd.io.sql.DatabaseError):
+        con.close()
         raise Exception(f"Baralho com o nome '{DECK_NAME}' não encontrado. Verifique o nome.")
 
-    # Pega as notas e os cartões do baralho
-    query = f"""
-    SELECT
-      n.flds -- Campos da nota (frente, verso, etc.)
-    FROM cards c
-    JOIN notes n ON c.nid = n.id
-    WHERE c.did = {deck_id}
-    """
+    query = f"SELECT n.flds FROM cards c JOIN notes n ON c.nid = n.id WHERE c.did = {deck_id}"
     cards_df = pd.read_sql_query(query, con)
     con.close()
     
     cards_list = []
     for flds in cards_df['flds']:
-        # O campo flds é separado por um caractere especial (0x1f)
         parts = flds.split('\x1f')
         if len(parts) >= 2:
-            cards_list.append({
-                "front": parts[0],
-                "back": parts[1]
-            })
+            cards_list.append({"front": parts[0], "back": parts[1]})
             
     print(f"{len(cards_list)} cartões extraídos com sucesso.")
     return cards_list
@@ -135,5 +143,6 @@ if __name__ == "__main__":
     anki_login_and_download()
     extracted_cards = extract_cards_from_db()
     generate_html(extracted_cards)
+
 
 
