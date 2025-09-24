@@ -1,6 +1,0 @@
-requests
-selenium
-pandas
-bs4
-webdriver_manager
-selenium_stealth
