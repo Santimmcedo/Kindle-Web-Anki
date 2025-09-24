@@ -6,16 +6,9 @@ import sqlite3
 import pandas as pd
 import time
 
-# Importações do Selenium
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException
-
 # --- Configuração ---
-ANKIWEB_USERNAME = os.environ.get("ANKIWEB_USERNAME")
-ANKIWEB_PASSWORD = os.environ.get("ANKIWEB_PASSWORD")
+# O login agora é feito através de um cookie de sessão para maior fiabilidade
+ANKIWEB_COOKIE = os.environ.get("ANKIWEB_SESSION_COOKIE")
 DECK_NAME = os.environ.get("DECK_NAME", "Default")
 
 # --- Caminhos de Arquivos ---
@@ -24,71 +17,44 @@ DB_PATH = os.path.join(OUTPUT_DIR, "collection.anki2")
 HTML_PATH = os.path.join(OUTPUT_DIR, "index.html")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-def anki_login_and_download():
-    """Faz login no AnkiWeb usando um navegador real (Selenium) e baixa a coleção."""
-    print("Configurando o navegador headless...")
-    options = webdriver.ChromeOptions()
-    options.add_argument("--headless")
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--window-size=1920,1080")
+def anki_download_with_cookie():
+    """Baixa a coleção do AnkiWeb usando um cookie de sessão em vez de login."""
+    if not ANKIWEB_COOKIE:
+        raise Exception("O 'Secret' ANKIWEB_SESSION_COOKIE não foi configurado no GitHub.")
+
+    print("Configurando a sessão de download com o cookie...")
+    session = requests.Session()
     
-    driver = webdriver.Chrome(options=options)
+    # Adiciona o cookie à sessão
+    session.cookies.set('ankiweb', ANKIWEB_COOKIE, domain='.ankiweb.net')
     
+    # Adiciona um User-Agent para parecer um navegador normal
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+    }
+    
+    print("Baixando a coleção de baralhos...")
+    download_url = "https://ankiweb.net/decks/download"
     try:
-        print("Navegando para a página de login do AnkiWeb...")
-        driver.get("https://ankiweb.net/account/login")
-
-        # Espera até que os campos de login estejam presentes
-        wait = WebDriverWait(driver, 15)
-        
-        print("Preenchendo o formulário de login...")
-        email_field = wait.until(EC.presence_of_element_located((By.ID, "email")))
-        password_field = wait.until(EC.presence_of_element_located((By.ID, "password")))
-        
-        email_field.send_keys(ANKIWEB_USERNAME)
-        password_field.send_keys(ANKIWEB_PASSWORD)
-        
-        print("Submetendo o formulário...")
-        login_button = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, ".btn-primary")))
-        login_button.click()
-        
-        # Espera pelo redirecionamento para a página de baralhos como confirmação de login
-        wait.until(EC.url_contains("/decks/"))
-        print("Login bem-sucedido.")
-
-        # ATUALIZAÇÃO: Usa os cookies do Selenium para baixar com o 'requests'
-        print("Extraindo cookies da sessão do navegador...")
-        selenium_cookies = driver.get_cookies()
-        
-        # Cria uma sessão 'requests' para o download
-        session = requests.Session()
-        for cookie in selenium_cookies:
-            session.cookies.set(cookie['name'], cookie['value'], domain=cookie['domain'])
-
-        print("Baixando a coleção de baralhos...")
-        download_url = "https://ankiweb.net/decks/download"
-        response = session.get(download_url, stream=True, headers={'User-Agent': 'Mozilla/5.0'})
+        response = session.get(download_url, stream=True, headers=headers, timeout=60)
         
         if response.status_code != 200:
-            raise Exception(f"Não foi possível baixar a coleção. Status: {response.status_code}")
+            print(f"--- DEBUG INFO ---")
+            print(f"Status Code: {response.status_code}")
+            print(f"URL: {response.url}")
+            print(f"Response Text (início): {response.text[:500]}")
+            print(f"--------------------")
+            raise Exception(f"Não foi possível baixar a coleção. O cookie pode ser inválido ou ter expirado.")
 
         zip_path = os.path.join(OUTPUT_DIR, "collection.apkg")
         with open(zip_path, "wb") as f:
             for chunk in response.iter_content(chunk_size=8192):
                 f.write(chunk)
         print("Download da coleção concluído.")
-        
-    except TimeoutException:
-        print("--- DEBUG INFO (SELENIUM) ---")
-        print(f"URL atual: {driver.current_url}")
-        print("Ocorreu um Timeout. A página pode ter mudado ou o login falhou.")
-        driver.save_screenshot("debug_screenshot.png") # Salva uma imagem para depuração
-        print(f"Screenshot salvo como 'debug_screenshot.png' nos artifacts da Action.")
-        print("-----------------------------")
-        raise Exception("Falha no login do AnkiWeb (Timeout). Verifique as credenciais ou a estrutura da página.")
-    finally:
-        driver.quit()
+
+    except requests.exceptions.RequestException as e:
+        raise Exception(f"Ocorreu um erro de rede durante o download: {e}")
+
 
     print("Extraindo a coleção...")
     with zipfile.ZipFile(zip_path, 'r') as zip_ref:
@@ -143,10 +109,10 @@ document.addEventListener('DOMContentLoaded',()=>{{const t=document.getElementBy
     print(f"Arquivo HTML salvo em: {HTML_PATH}")
 
 if __name__ == "__main__":
-    anki_login_and_download()
+    # Removemos a necessidade do Selenium e do login, usando o cookie diretamente
+    anki_download_with_cookie()
     extracted_cards = extract_cards_from_db()
     generate_html(extracted_cards)
-
 
 
 
