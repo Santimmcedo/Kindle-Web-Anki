@@ -15,7 +15,6 @@ def anki_login_and_process():
     Usa Selenium para fazer login diretamente no AnkiWeb, obtém o CSRF token
     e depois faz o download da coleção.
     """
-    # --- NOVO LOG MAIS ROBUSTO ---
     print("A verificar a presença dos Secrets...")
     username = os.environ.get("ANKIWEB_USERNAME")
     password = os.environ.get("ANKIWEB_PASSWORD")
@@ -34,7 +33,6 @@ def anki_login_and_process():
     
     print("Todos os Secrets foram encontrados com sucesso.")
     
-    # --- Parte 1: Usar Selenium para fazer login e obter o CSRF token ---
     print("A configurar o navegador Chrome com Selenium...")
     options = webdriver.ChromeOptions()
     options.add_argument("--headless")
@@ -42,6 +40,10 @@ def anki_login_and_process():
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--window-size=1920,1080")
     options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
+    
+    # --- MUDANÇA CRUCIAL PARA EVITAR DETEÇÃO ---
+    options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    options.add_argument('--disable-blink-features=AutomationControlled')
     
     driver = webdriver.Chrome(service=ChromeService(ChromeDriverManager().install()), options=options)
     
@@ -53,7 +55,6 @@ def anki_login_and_process():
         
         wait = WebDriverWait(driver, 30)
         
-        # Espera que os campos de login estejam visíveis e preenche-os
         print("A preencher o formulário de login...")
         email_field = wait.until(EC.visibility_of_element_located((By.ID, "email")))
         email_field.send_keys(username)
@@ -61,16 +62,13 @@ def anki_login_and_process():
         password_field = driver.find_element(By.ID, "password")
         password_field.send_keys(password)
         
-        # Clica no botão de login
         login_button = driver.find_element(By.CSS_SELECTOR, "button[type='submit']")
         login_button.click()
 
-        # Espera que o login seja bem-sucedido, verificando o link "Decks"
         print("A aguardar o redirecionamento após o login...")
         wait.until(EC.visibility_of_element_located((By.XPATH, "//a[contains(text(), 'Decks')]")))
         print("Login realizado com sucesso! A página de baralhos foi carregada.")
 
-        # Extrai o cookie de sessão e o token CSRF para uso posterior
         session_cookie = driver.get_cookie("ankiweb")['value']
         csrf_token_element = driver.find_element(By.CSS_SELECTOR, "input[name='csrf_token']")
         csrf_token = csrf_token_element.get_attribute('value')
@@ -78,6 +76,8 @@ def anki_login_and_process():
 
     except Exception as e:
         print("--- DEBUG INFO (SELENIUM) ---")
+        print("A página HTML no momento do erro era:")
+        print(driver.page_source) # Imprime o HTML para depuração
         driver.save_screenshot("debug_screenshot.png")
         print(f"\nOcorreu um erro durante a automação do navegador: {e}")
         print("Screenshot de depuração salvo nos 'artifacts' da Action.")
