@@ -15,13 +15,25 @@ def anki_login_and_process():
     Usa Selenium para fazer login diretamente no AnkiWeb, obtém o CSRF token
     e depois faz o download da coleção.
     """
+    # --- NOVO LOG MAIS ROBUSTO ---
+    print("A verificar a presença dos Secrets...")
     username = os.environ.get("ANKIWEB_USERNAME")
     password = os.environ.get("ANKIWEB_PASSWORD")
     deck_name_to_find = os.environ.get("DECK_NAME")
 
-    if not username or not password or not deck_name_to_find:
-        raise Exception("Os 'Secrets' ANKIWEB_USERNAME, ANKIWEB_PASSWORD e DECK_NAME devem ser configurados.")
+    missing_secrets = []
+    if not username:
+        missing_secrets.append("ANKIWEB_USERNAME")
+    if not password:
+        missing_secrets.append("ANKIWEB_PASSWORD")
+    if not deck_name_to_find:
+        missing_secrets.append("DECK_NAME")
 
+    if missing_secrets:
+        raise Exception(f"ERRO: Os seguintes 'Secrets' não foram encontrados ou estão vazios: {', '.join(missing_secrets)}. Verifique a configuração de 'Repository secrets' no GitHub.")
+    
+    print("Todos os Secrets foram encontrados com sucesso.")
+    
     # --- Parte 1: Usar Selenium para fazer login e obter o CSRF token ---
     print("A configurar o navegador Chrome com Selenium...")
     options = webdriver.ChromeOptions()
@@ -137,5 +149,4 @@ def anki_login_and_process():
 
 if __name__ == "__main__":
     anki_login_and_process()
-
 
