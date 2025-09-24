@@ -21,7 +21,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
       
-      # --- NOVO PASSO DE DEPURAÇÃO ---
+      # Este passo irá confirmar que os secrets corretos estão a ser lidos
       - name: Check for Secrets
         run: |
           if [ -z "${{ secrets.ANKIWEB_USERNAME }}" ]; then
@@ -53,6 +53,7 @@ jobs:
       - name: Run exporter script
         run: python anki_exporter.py
         env:
+          # Garante que os secrets corretos são passados para o Python
           ANKIWEB_USERNAME: ${{ secrets.ANKIWEB_USERNAME }}
           ANKIWEB_PASSWORD: ${{ secrets.ANKIWEB_PASSWORD }}
           DECK_NAME: ${{ secrets.DECK_NAME }}
