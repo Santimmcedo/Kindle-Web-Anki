@@ -27,19 +27,16 @@ def anki_download_and_process():
     options.add_argument("--headless")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
-    # --- Opções para parecer mais "humano" ---
     options.add_argument("--window-size=1920,1080")
     options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
     options.add_experimental_option("excludeSwitches", ["enable-automation"])
     options.add_argument('--disable-blink-features=AutomationControlled')
     
-    # Instala e configura o driver do Chrome automaticamente
     driver = webdriver.Chrome(service=ChromeService(ChromeDriverManager().install()), options=options)
     
     csrf_token = None
     try:
         print("A navegar para o AnkiWeb para injetar o cookie...")
-        # É preciso ir a uma página do domínio primeiro para poder definir o cookie
         driver.get("https://ankiweb.net/decks")
 
         print("A injetar o cookie de sessão...")
@@ -55,28 +52,27 @@ def anki_download_and_process():
         print("A recarregar a página de baralhos (agora com login)...")
         driver.get("https://ankiweb.net/decks")
         
-        # Espera até 20 segundos para que o JavaScript carregue e o elemento do token apareça
+        # --- MUDANÇA CRUCIAL ---
+        # Espera até 30 segundos que um elemento visível (o link dos baralhos) apareça.
+        # Isto confirma que o login funcionou e a página renderizou.
         print("A esperar que a página seja renderizada pelo JavaScript...")
-        wait = WebDriverWait(driver, 20)
-        csrf_token_element = wait.until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, "input[name='csrf_token']"))
+        wait = WebDriverWait(driver, 30)
+        wait.until(
+            EC.visibility_of_element_located((By.XPATH, "//a[contains(text(), 'Decks')]"))
         )
+        print("Página de baralhos carregada com sucesso!")
         
+        # Agora que a página carregou, o token DEVE estar presente.
+        csrf_token_element = driver.find_element(By.CSS_SELECTOR, "input[name='csrf_token']")
         csrf_token = csrf_token_element.get_attribute('value')
         print("Token de segurança (CSRF) extraído com sucesso!")
 
     except Exception as e:
         print("--- DEBUG INFO (SELENIUM) ---")
-        # Tenta capturar o texto do alerta, se houver
-        try:
-            alert_text = driver.switch_to.alert.text
-            print(f"Texto do alerta capturado: {alert_text}")
-            driver.switch_to.alert.accept()
-        except:
-            pass # Ignora se não houver alerta
-
+        print("A página HTML no momento do erro era:")
+        print(driver.page_source) # Imprime o HTML para depuração
         driver.save_screenshot("debug_screenshot.png")
-        print(f"Ocorreu um erro durante a automação do navegador: {e}")
+        print(f"\nOcorreu um erro durante a automação do navegador: {e}")
         print("Screenshot de depuração salvo nos 'artifacts' da Action.")
         raise
     finally:
@@ -146,6 +142,5 @@ def anki_download_and_process():
 
 if __name__ == "__main__":
     anki_download_and_process()
-
 
 
