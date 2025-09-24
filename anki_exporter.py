@@ -10,18 +10,19 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
 
-def anki_download_and_process():
+def anki_login_and_process():
     """
-    Usa Selenium para lidar com a página JavaScript do AnkiWeb, obtém o CSRF token
+    Usa Selenium para fazer login diretamente no AnkiWeb, obtém o CSRF token
     e depois faz o download da coleção.
     """
-    cookie_value = os.environ.get("ANKIWEB_SESSION_COOKIE")
+    username = os.environ.get("ANKIWEB_USERNAME")
+    password = os.environ.get("ANKIWEB_PASSWORD")
     deck_name_to_find = os.environ.get("DECK_NAME")
 
-    if not cookie_value or not deck_name_to_find:
-        raise Exception("Os 'Secrets' ANKIWEB_SESSION_COOKIE e DECK_NAME devem ser configurados.")
+    if not username or not password or not deck_name_to_find:
+        raise Exception("Os 'Secrets' ANKIWEB_USERNAME, ANKIWEB_PASSWORD e DECK_NAME devem ser configurados.")
 
-    # --- Parte 1: Usar Selenium para obter o CSRF token ---
+    # --- Parte 1: Usar Selenium para fazer login e obter o CSRF token ---
     print("A configurar o navegador Chrome com Selenium...")
     options = webdriver.ChromeOptions()
     options.add_argument("--headless")
@@ -29,51 +30,42 @@ def anki_download_and_process():
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--window-size=1920,1080")
     options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
-    options.add_experimental_option("excludeSwitches", ["enable-automation"])
-    options.add_argument('--disable-blink-features=AutomationControlled')
     
     driver = webdriver.Chrome(service=ChromeService(ChromeDriverManager().install()), options=options)
     
+    session_cookie = None
     csrf_token = None
     try:
-        print("A navegar para o AnkiWeb para injetar o cookie...")
-        driver.get("https://ankiweb.net/decks")
-
-        print("A injetar o cookie de sessão...")
-        driver.add_cookie({
-            'name': 'ankiweb',
-            'value': cookie_value,
-            'domain': '.ankiweb.net',
-            'path': '/',
-            'secure': True,
-            'samesite': 'Lax'
-        })
-
-        print("A recarregar a página de baralhos (agora com login)...")
-        driver.get("https://ankiweb.net/decks")
+        print("A navegar para a página de login do AnkiWeb...")
+        driver.get("https://ankiweb.net/account/login")
         
-        # --- LÓGICA DE ESPERA EM DUAS ETAPAS ---
         wait = WebDriverWait(driver, 30)
-
-        # 1. Espera que a página principal seja renderizada (procurando pelo link "Decks")
-        print("A esperar que a página principal seja renderizada...")
-        wait.until(
-            EC.visibility_of_element_located((By.XPATH, "//a[contains(text(), 'Decks')]"))
-        )
-        print("Página de baralhos carregada com sucesso!")
         
-        # 2. Agora, espera especificamente pelo campo do token de segurança.
-        print("A esperar pelo token de segurança (CSRF)...")
-        csrf_token_element = wait.until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, "input[name='csrf_token']"))
-        )
+        # Espera que os campos de login estejam visíveis e preenche-os
+        print("A preencher o formulário de login...")
+        email_field = wait.until(EC.visibility_of_element_located((By.ID, "email")))
+        email_field.send_keys(username)
+        
+        password_field = driver.find_element(By.ID, "password")
+        password_field.send_keys(password)
+        
+        # Clica no botão de login
+        login_button = driver.find_element(By.CSS_SELECTOR, "button[type='submit']")
+        login_button.click()
+
+        # Espera que o login seja bem-sucedido, verificando o link "Decks"
+        print("A aguardar o redirecionamento após o login...")
+        wait.until(EC.visibility_of_element_located((By.XPATH, "//a[contains(text(), 'Decks')]")))
+        print("Login realizado com sucesso! A página de baralhos foi carregada.")
+
+        # Extrai o cookie de sessão e o token CSRF para uso posterior
+        session_cookie = driver.get_cookie("ankiweb")['value']
+        csrf_token_element = driver.find_element(By.CSS_SELECTOR, "input[name='csrf_token']")
         csrf_token = csrf_token_element.get_attribute('value')
-        print("Token de segurança (CSRF) extraído com sucesso!")
+        print("Cookie de sessão e token de segurança (CSRF) extraídos com sucesso!")
 
     except Exception as e:
         print("--- DEBUG INFO (SELENIUM) ---")
-        print("A página HTML no momento do erro era:")
-        print(driver.page_source) # Imprime o HTML para depuração
         driver.save_screenshot("debug_screenshot.png")
         print(f"\nOcorreu um erro durante a automação do navegador: {e}")
         print("Screenshot de depuração salvo nos 'artifacts' da Action.")
@@ -81,13 +73,13 @@ def anki_download_and_process():
     finally:
         driver.quit()
 
-    if not csrf_token:
-        raise Exception("Não foi possível extrair o CSRF token mesmo com o Selenium.")
+    if not session_cookie or not csrf_token:
+        raise Exception("Não foi possível extrair o cookie ou o CSRF token após o login.")
 
     # --- Parte 2: Usar Requests para fazer o download ---
     print("A usar o 'requests' para baixar a coleção...")
     with requests.Session() as session:
-        session.cookies.set("ankiweb", cookie_value)
+        session.cookies.set("ankiweb", session_cookie)
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
             "Referer": "https://ankiweb.net/decks/",
@@ -136,7 +128,7 @@ def anki_download_and_process():
     
     # --- Parte 4: Criar o ficheiro HTML final (sem alterações) ---
     html_template = f"""
-    <!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Anki Viewer</title><style>body{{font-family:sans-serif;background-color:#f0f0f0;margin:0;padding:20px;display:flex;flex-direction:column;align-items:center;min-height:100vh;box-sizing:border-box}}.container{{width:100%;max-width:800px;background-color:#fff;border:1px solid #ccc;box-shadow:0 2px 5px rgba(0,0,0,0.1)}}.card-display{{min-height:200px;padding:20px;font-size:1.5em;text-align:center;border-bottom:1px solid #ccc;cursor:pointer}}.controls{{display:flex;justify-content:space-between;padding:10px;background-color:#f9f9f9}}button{{font-size:1.2em;padding:15px 20px;border:1px solid #ccc;background-color:#e9e9e9;cursor:pointer;flex-grow:1;margin:5px;border-radius:5px}}button:hover{{background-color:#ddd}}.counter{{text-align:center;padding:10px;font-size:1em;color:#555}}.card{{display:none}}.back{{display:none}}</style></head><body><div class="container"><div class="card-display" id="card-display" onclick="flipCard()">Toque para começar</div><div class="controls"><button onclick="prevCard()">Anterior</button><button onclick="nextCard()">Próximo</button></div><div class="counter" id="counter"></div></div><div id="card-data">{cards_html}</div><script>const cards=document.querySelectorAll('#card-data .card'),cardDisplay=document.getElementById('card-display'),counterDisplay=document.getElementById('counter');let currentCardIndex=0,isFront=!0;function showCard(e){{if(0===cards.length){{cardDisplay.innerHTML="Nenhum cartão encontrado.";counterDisplay.innerHTML="0 / 0";return}}currentCardIndex=e,isFront=!0;const t=cards[currentCardIndex].querySelector('.front').innerHTML;cardDisplay.innerHTML=t,counterDisplay.innerHTML=`${{currentCardIndex+1}} / ${{cards.length}}`}}function flipCard(){{if(0===cards.length)return;isFront=!isFront;const e=isFront?cards[currentCardIndex].querySelector('.front').innerHTML:cards[currentCardIndex].querySelector('.back').innerHTML;cardDisplay.innerHTML=e}}function nextCard(){{const e=(currentCardIndex+1)%cards.length;showCard(e)}}function prevCard(){{const e=(currentCardIndex-1+cards.length)%cards.length;showCard(e)}}showCard(0);</script></body></html>
+    <!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Anki Viewer</title><style>body{{font-family:sans-serif;background-color:#f0f0f0;margin:0;padding:20px;display:flex;flex-direction:column;align-items:center;min-height:100vh;box-sizing:border-box}}.container{{width:100%;max-width:800px;background-color:#fff;border:1px solid #ccc;box-shadow:0 2px 5px rgba(0,0,0,0.1)}}.card-display{{min-height:200px;padding:20px;font-size:1.5em;text-align:center;border-bottom:1px solid #ccc;cursor:pointer}}.controls{{display:flex;justify-content:space-between;padding:10px;background-color:#f9f9f9}}button{{font-size:1.2em;padding:15px 20px;border:1px solid #ccc;background-color:#e9e9e9;cursor:pointer;flex-grow:1;margin:5px;border-radius:5px}}button:hover{{background-color:#ddd}}.counter{{text-align:center;padding:10px;font-size:1.em;color:#555}}.card{{display:none}}.back{{display:none}}</style></head><body><div class="container"><div class="card-display" id="card-display" onclick="flipCard()">Toque para começar</div><div class="controls"><button onclick="prevCard()">Anterior</button><button onclick="nextCard()">Próximo</button></div><div class="counter" id="counter"></div></div><div id="card-data">{cards_html}</div><script>const cards=document.querySelectorAll('#card-data .card'),cardDisplay=document.getElementById('card-display'),counterDisplay=document.getElementById('counter');let currentCardIndex=0,isFront=!0;function showCard(e){{if(0===cards.length){{cardDisplay.innerHTML="Nenhum cartão encontrado.";counterDisplay.innerHTML="0 / 0";return}}currentCardIndex=e,isFront=!0;const t=cards[currentCardIndex].querySelector('.front').innerHTML;cardDisplay.innerHTML=t,counterDisplay.innerHTML=`${{currentCardIndex+1}} / ${{cards.length}}`}}function flipCard(){{if(0===cards.length)return;isFront=!isFront;const e=isFront?cards[currentCardIndex].querySelector('.front').innerHTML:cards[currentCardIndex].querySelector('.back').innerHTML;cardDisplay.innerHTML=e}}function nextCard(){{const e=(currentCardIndex+1)%cards.length;showCard(e)}}function prevCard(){{const e=(currentCardIndex-1+cards.length)%cards.length;showCard(e)}}showCard(0);</script></body></html>
     """
     os.makedirs("public", exist_ok=True)
     with open("public/index.html", "w", encoding="utf-8") as f:
@@ -144,6 +136,6 @@ def anki_download_and_process():
     print("Ficheiro public/index.html criado com sucesso.")
 
 if __name__ == "__main__":
-    anki_download_and_process()
+    anki_login_and_process()
 
 
